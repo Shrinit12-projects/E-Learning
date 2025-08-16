@@ -1,0 +1,40 @@
+# elearningdb/docker-compose.yml
+services:
+  mongo:
+    image: mongo:6.0
+    container_name: elearning-mongo
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - elearning_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: elearning-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - elearning_net
+
+  mongo-init:
+    image: mongo:6.0
+    container_name: elearning-mongo-init
+    depends_on:
+      - mongo
+    networks:
+      - elearning_net
+    # Run our init script once; script handles idempotency
+    entrypoint: ["/bin/bash", "/scripts/mongo-init.sh"]
+    volumes:
+      - ../mongo-init.sh:/scripts/mongo-init.sh:ro
+
+volumes:
+  mongo-data:
+
+networks:
+  elearning_net:
+    name: elearning_net
+    driver: bridge
