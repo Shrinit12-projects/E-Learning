@@ -9,6 +9,8 @@ from services import course_service
 from schemas.course_schema import CourseCreate, CourseUpdate, ModuleUpdate, CoursesPage, CourseOut
 from bson import json_util
 from repos.helper import JSONEncoder
+# Get analytics from existing service
+from services import analytics_service
 
 router = APIRouter(prefix="/courses", tags=["courses"])
 
@@ -186,17 +188,33 @@ async def replace_course(course_id: str, payload: CourseUpdate,
 
 # Route to get analytics for a course
 @router.get("/{course_id}/analytics", dependencies=[Depends(require_role("instructor", "admin"))])
-async def course_analytics_preview(course_id: str):
+async def course_analytics_preview(course_id: str, db: Database = Depends(get_db), r: Redis = Depends(get_redis), user=Depends(get_current_user)):
     """
     Get analytics for a specific course. Only instructors and admins can access.
-    Currently a stub - will be implemented later.
     
     Args:
         course_id: ID of course to get analytics for
+        db: MongoDB database instance
+        r: Redis instance
+        user: Current authenticated user
         
     Returns:
-        Placeholder message
+        Course analytics data including enrollment, completion rates, and performance metrics
     """
-    # Stub for now – will implement in Analytics section per PDF.
-    # Keeping endpoint in place so links/docs remain stable.
-    return {"message": "Course analytics will be implemented later"}
+    # Verify course exists and user has access
+    course = await course_service.get_course(db, r, course_id)
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Parse course if it's a string
+    if isinstance(course, str):
+        course = json.loads(course)
+    
+    # Enforce ownership unless admin
+    if user["role"] != "admin" and course["instructor_id"] != str(user["_id"]):
+        raise HTTPException(status_code=403, detail="Not allowed")
+    
+    
+    analytics = await analytics_service.course_performance(db, r, course_id)
+    
+    return analytics

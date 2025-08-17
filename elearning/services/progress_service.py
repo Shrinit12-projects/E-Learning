@@ -47,9 +47,12 @@ async def complete_lesson(db: Database, r: Redis, *, user_id: str, course_id: st
     await _del_l1(ck); await r.delete(ck)
     await _del_l1(dk); await r.delete(dk)
 
+    await r.delete(dk)
+
     # Seed progress cache hot
-    await r.set(ck, json.dumps(JSONEncoder().encode(doc)), ex=PROGRESS_TTL)
-    await _set_l1(ck, doc, ttl=PROGRESS_TTL)
+    serialized = json.dumps(doc, cls=JSONEncoder)
+    await r.set(ck, serialized, ex=PROGRESS_TTL)
+    await _set_l1(ck, json.loads(serialized), ttl=PROGRESS_TTL)
     return doc
 
 async def get_course_progress(db: Database, r: Redis, *, user_id: str, course_id: str) -> Optional[Dict[str, Any]]:
@@ -77,8 +80,9 @@ async def get_course_progress(db: Database, r: Redis, *, user_id: str, course_id
         await miss(r, "progress")
         doc = await run_in_threadpool(repo.get_user_course_progress, db, user_id, course_id)
         if doc:
-            await r.set(key, json.dumps(JSONEncoder().encode(doc)), ex=PROGRESS_TTL)
-            await _set_l1(key, doc, ttl=PROGRESS_TTL)
+            serialized = json.dumps(doc, cls=JSONEncoder)
+            await r.set(key, serialized, ex=PROGRESS_TTL)
+            await _set_l1(key, json.loads(serialized), ttl=PROGRESS_TTL)
         return doc
 
 async def get_dashboard(db: Database, r: Redis, *, user_id: str) -> Dict[str, Any]:
@@ -86,6 +90,7 @@ async def get_dashboard(db: Database, r: Redis, *, user_id: str) -> Dict[str, An
 
     cached = await _get_l1(key)
     if cached:
+        print("cache hit", cached)
         await hit(r, "dashboard")
         return cached
 
@@ -98,6 +103,7 @@ async def get_dashboard(db: Database, r: Redis, *, user_id: str) -> Dict[str, An
 
         cached_l2 = await r.get(key)
         if cached_l2:
+            print("cache hit L2", cached_l2)
             payload = json.loads(cached_l2)
             await _set_l1(key, payload, ttl=DASHBOARD_TTL)
             await hit(r, "dashboard")
@@ -105,6 +111,9 @@ async def get_dashboard(db: Database, r: Redis, *, user_id: str) -> Dict[str, An
 
         await miss(r, "dashboard")
         doc = await run_in_threadpool(repo.get_user_dashboard, db, user_id)
-        await r.set(key, json.dumps(JSONEncoder().encode(doc)), ex=DASHBOARD_TTL)
-        await _set_l1(key, doc, ttl=DASHBOARD_TTL)
+
+        serialized = json.dumps(doc, cls=JSONEncoder)
+        print("cache miss", serialized)
+        await r.set(key, serialized, ex=DASHBOARD_TTL)
+        await _set_l1(key, json.loads(serialized), ttl=DASHBOARD_TTL)
         return doc

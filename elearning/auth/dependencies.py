@@ -6,6 +6,7 @@ from deps import get_redis, get_db
 from auth.jwt import decode_token
 from pymongo.database import Database
 from bson import ObjectId
+from services.cache_keys import blacklisted_jti_key, user_session_key
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
@@ -22,10 +23,10 @@ async def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
     jti = payload.get("jti")
-    if await r.get(f"blacklisted_tokens:{jti}"):
+    if await r.get(blacklisted_jti_key(jti)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked")
 
-    if not await r.get(f"user_session:{payload['sub']}"):
+    if not await r.get(user_session_key(payload['sub'])):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
 
     user = db.users.find_one({"_id": ObjectId(payload["sub"])})

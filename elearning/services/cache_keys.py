@@ -18,6 +18,9 @@ def analytics_course_key(course_id: str) -> str:
 def analytics_platform_overview_key() -> str:
     return "analytics:platform:overview"
 
+def analytics_student_patterns_key(user_id: str) -> str:
+    return f"analytics:student:{user_id}:patterns"
+
 def search_key(query_hash: str) -> str:
     return f"search:{query_hash}"
 

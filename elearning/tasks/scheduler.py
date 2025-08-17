@@ -18,19 +18,41 @@ def create_scheduler() -> AsyncIOScheduler:
 def schedule_jobs(scheduler: AsyncIOScheduler, db: Database, r: Redis) -> None:
     # Warm course caches periodically
     print("i am here")
+    # Warm course caches periodically
     scheduler.add_job(
         warm_courses,
-        trigger=IntervalTrigger(minutes=30),
+        trigger=IntervalTrigger(minutes=5),
         args=[db, r],
         id="warm_courses",
         replace_existing=True,
     )
+
     # Popular courses list (performance caching)
-    scheduler.add_job(lambda: warm_popular_courses(db, r), IntervalTrigger(hours=1), id="popular_courses", replace_existing=True)
+    scheduler.add_job(
+        warm_popular_courses,
+        trigger=IntervalTrigger(hours=1),
+        args=[db, r],
+        id="popular_courses",
+        replace_existing=True,
+    )
+
     # Platform analytics overview (analytics caching)
-    scheduler.add_job(lambda: warm_platform_overview(db, r), IntervalTrigger(hours=1), id="platform_overview", replace_existing=True)
-    # Example: per-course analytics (stub)
-    scheduler.add_job(lambda: warm_course_analytics(db, r), IntervalTrigger(minutes=30), id="course_analytics", replace_existing=True)
+    scheduler.add_job(
+        warm_platform_overview,
+        trigger=IntervalTrigger(hours=1),
+        args=[db, r],
+        id="platform_overview",
+        replace_existing=True,
+    )
+
+    # Per-course analytics (stub)
+    scheduler.add_job(
+        warm_course_analytics,
+        trigger=IntervalTrigger(minutes=30),
+        args=[db, r],
+        id="course_analytics",
+        replace_existing=True,
+    )
 
 async def warm_courses(db: Database, r: Redis):
     print("warming courses")

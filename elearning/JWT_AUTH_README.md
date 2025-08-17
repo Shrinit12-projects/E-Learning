@@ -203,3 +203,40 @@ If you give me back **this README** later:
 - I’ll know the endpoints, request/response formats, and token flow
 - I’ll know your TTLs, claims, and key patterns
 - I’ll know your role-based access dependency
+
+
+```mermaid
+flowchart LR
+  subgraph Client
+    U[User]
+  end
+
+  subgraph API[FastAPI App]
+    R1[Routers<br/>courses, progress, auth, admin]
+    S1[Service Layer<br/>course_service, progress_service]
+    C1[L1 Memory Cache<br/>locks + TTL]
+    BG[Background Tasks<br/>APScheduler + BackgroundTasks]
+  end
+
+  subgraph Data
+    M[(MongoDB)]
+    D[(Redis)]
+  end
+
+  U --> R1
+  R1 --> S1
+
+  S1 -->|read-through| C1
+  C1 -->|miss| D
+  D -->|miss| M
+  M --> D
+  D --> C1
+  C1 --> R1
+
+  R1 -->|writes| S1 --> M
+  S1 -->|invalidate keys| D
+  S1 -->|invalidate keys| C1
+
+  BG -->|warming jobs| S1
+  BG --> D
+  ```

@@ -10,6 +10,7 @@ from deps import get_db, get_redis
 from repos import users
 from schemas.auth_schemas import UserRegister, TokenPair, TokenRefresh
 from auth.jwt import create_access_token, create_refresh_token, decode_token, get_token_jti
+from services.cache_keys import user_session_key, refresh_tokens_key, blacklisted_jti_key
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -38,8 +39,8 @@ async def login(
     access_token = create_access_token({"sub": user_id, "role": user["role"]})
     refresh_token = create_refresh_token({"sub": user_id, "role": user["role"]})
 
-    await r.set(f"user_session:{user_id}", json.dumps({"email": user["email"], "role": user["role"]}), ex=SESSION_TTL)
-    await r.set(f"refresh_tokens:{user_id}", refresh_token, ex=REFRESH_TTL)
+    await r.set(user_session_key(user_id), json.dumps({"email": user["email"], "role": user["role"]}), ex=SESSION_TTL)
+    await r.set(refresh_tokens_key(user_id), refresh_token, ex=REFRESH_TTL)
 
     return TokenPair(access_token=access_token, refresh_token=refresh_token)
 
@@ -54,7 +55,7 @@ async def refresh(payload: TokenRefresh, r: Redis = Depends(get_redis)):
         raise HTTPException(status_code=401, detail=str(e))
 
     user_id = decoded["sub"]
-    stored_refresh = await r.get(f"refresh_tokens:{user_id}")
+    stored_refresh = await r.get(refresh_tokens_key(user_id))
     if stored_refresh != payload.refresh_token:
         raise HTTPException(status_code=401, detail="Refresh token expired or revoked")
 
@@ -71,9 +72,9 @@ async def logout(token: str = Depends(OAuth2PasswordBearer(tokenUrl="/auth/login
 
     jti = decoded["jti"]
     ttl = decoded["exp"] - int(datetime.now(timezone.utc).timestamp())
-    await r.set(f"blacklisted_tokens:{jti}", "true", ex=ttl)
+    await r.set(blacklisted_jti_key(jti), "true", ex=ttl)
 
-    await r.delete(f"user_session:{decoded['sub']}")
-    await r.delete(f"refresh_tokens:{decoded['sub']}")
+    await r.delete(user_session_key(decoded['sub']))
+    await r.delete(refresh_tokens_key(decoded['sub']))
 
     return {"message": "Logged out successfully"}

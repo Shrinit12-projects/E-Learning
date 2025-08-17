@@ -5,6 +5,7 @@ from bson import ObjectId
 from pymongo.database import Database
 from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import DuplicateKeyError
+from services.cache_keys import analytics_course_key, user_dashboard_key, progress_key, analytics_student_patterns_key
 
 def _oid(id_str: str) -> ObjectId:
     return ObjectId(id_str)
@@ -25,7 +26,7 @@ def get_user_course_progress(db: Database, user_id: str, course_id: str) -> Opti
     doc["_id"] = str(doc["_id"])
     return doc
 
-def upsert_lesson_completion(db: Database, *, user_id: str, course_id: str, lesson_id: str, ts: datetime) -> Dict[str, Any]:
+async def upsert_lesson_completion(db: Database, r, *, user_id: str, course_id: str, lesson_id: str, ts: datetime) -> Dict[str, Any]:
     try:
         db.progress.update_one(
             {"user_id": user_id, "course_id": course_id},
@@ -54,6 +55,14 @@ def upsert_lesson_completion(db: Database, *, user_id: str, course_id: str, less
         {"$set": {"progress_percent": percent, "total_lessons": total_lessons}}
     )
 
+    # Invalidate related caches
+    await r.delete(
+        analytics_course_key(course_id),
+        user_dashboard_key(user_id),
+        progress_key(user_id, course_id),
+        analytics_student_patterns_key(user_id)
+    )
+    
     out = db.progress.find_one({"user_id": user_id, "course_id": course_id})
     out["_id"] = str(out["_id"])
     return out
@@ -61,9 +70,10 @@ def upsert_lesson_completion(db: Database, *, user_id: str, course_id: str, less
 def get_user_dashboard(db: Database, user_id: str) -> Dict[str, Any]:
     pipeline = [
         {"$match": {"user_id": user_id}},
+        {"$addFields": {"course_id_obj": {"$toObjectId": "$course_id"}}},
         {"$lookup": {
             "from": "courses",
-            "localField": "course_id",
+            "localField": "course_id_obj",
             "foreignField": "_id",
             "as": "course"
         }},

@@ -13,6 +13,8 @@ from routers.courses_route import courses
 from services.course_service import warm_courses_cache  # NEW
 from repos.progress import ensure_indexes as ensure_progress_indexes
 from routers.student_progress import progress_route
+from routers.analytics_route import analytics
+from routers.cache_route import cache
 
 
 
@@ -60,3 +62,5 @@ app.include_router(health_router)
 app.include_router(auth.router)
 app.include_router(courses.router)
 app.include_router(progress_route.router)
+app.include_router(analytics.router)
+app.include_router(cache.router)
