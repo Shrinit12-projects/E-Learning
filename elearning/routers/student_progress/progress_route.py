@@ -6,9 +6,24 @@ from pymongo.database import Database
 from deps import get_db, get_redis
 from auth.dependencies import get_current_user
 from services import progress_service
-from schemas.progress_schema import CompleteLessonIn, CourseProgressOut, ProgressDashboardOut
+from schemas.progress_schema import CompleteLessonIn, CourseProgressOut, ProgressDashboardOut, VideoWatchTimeIn
 
 router = APIRouter(prefix="/progress", tags=["progress"])
+
+@router.post("/video-watch-time", status_code=status.HTTP_204_NO_CONTENT)
+async def track_video_watch_time(payload: VideoWatchTimeIn,
+                                db: Database = Depends(get_db),
+                                r: Redis = Depends(get_redis),
+                                user = Depends(get_current_user)):
+    try:
+        await progress_service.track_video_watch_time(
+            db, r, user_id=str(user["_id"]), 
+            course_id=payload.course_id, 
+            lesson_id=payload.lesson_id, 
+            watch_time=payload.watch_time
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
 
 @router.post("/lessons/{lesson_id}/complete", status_code=status.HTTP_204_NO_CONTENT)
 async def complete_lesson(lesson_id: str,
@@ -50,6 +65,7 @@ async def course_progress(course_id: str,
         "completed_count": len(doc.get("completed_lessons", [])),
         "total_lessons": doc.get("total_lessons", 0),
         "completed_lessons": doc.get("completed_lessons", []),
+        "video_watch_times": doc.get("video_watch_times", {}),
         "last_accessed": doc.get("last_accessed")
     }
 

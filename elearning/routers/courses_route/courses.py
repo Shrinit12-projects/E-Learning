@@ -61,7 +61,11 @@ async def list_courses(
         **({"min_duration": min_duration} if min_duration is not None else {}),
         **({"max_duration": max_duration} if max_duration is not None else {}),
     }
-    return await course_service.list_courses(db, r, q=search, filters=filters, page=page, page_size=page_size, sort_by=sort_by)
+    result = await course_service.list_courses(db, r, q=search, filters=filters, page=page, page_size=page_size, sort_by=sort_by)
+    # Parse if it's a JSON string
+    if isinstance(result, str):
+        result = json.loads(result)
+    return result
 
 # Route to create a new course
 @router.post("", response_model=CourseOut, status_code=status.HTTP_201_CREATED,
@@ -90,7 +94,7 @@ async def create_course(payload: CourseCreate, db: Database = Depends(get_db), r
     print("Course created:", doc)
     if not doc:
         raise HTTPException(status_code=500, detail="Failed to create course")
-    return json.loads(JSONEncoder().encode(doc))
+    return doc
 
 # Route to get a specific course by ID
 @router.get("/{course_id}", response_model=CourseOut)
@@ -112,6 +116,9 @@ async def get_course(course_id: str, db: Database = Depends(get_db), r: Redis = 
     doc = await course_service.get_course(db, r, course_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Course not found")
+    # Parse if it's a JSON string
+    if isinstance(doc, str):
+        doc = json.loads(doc)
     return doc
 
 # Route to update a specific module within a course

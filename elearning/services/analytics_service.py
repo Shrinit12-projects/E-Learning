@@ -64,18 +64,24 @@ async def course_performance(db: Database, r: Redis, course_id: str) -> Dict[str
             "_id": "$course_id",
             "students": {"$addToSet": "$user_id"},
             "avg_completion": {"$avg": "$progress_percent"},
+            "total_watch_time": {"$sum": {"$sum": {"$map": {"input": {"$objectToArray": {"$ifNull": ["$video_watch_times", {}]}}, "as": "item", "in": "$$item.v"}}}},
             "avg_quiz_score": {"$avg": 0},
         }}
     ]
     result = list(db.progress.aggregate(pipeline))
     if not result:
-        return {"course_id": course_id, "students": 0, "avg_completion": 0, "avg_quiz_score": 0}
+        return {"course_id": course_id, "students": 0, "avg_completion": 0, "total_watch_time": 0, "avg_quiz_score": 0}
 
     doc = result[0]
+    students_count = len(doc.get("students", []))
+    total_watch_time = doc.get("total_watch_time", 0)
+    
     payload = {
         "course_id": course_id,
-        "students": len(doc.get("students", [])),
+        "students": students_count,
         "avg_completion": round(doc.get("avg_completion") or 0, 2),
+        "total_watch_time_minutes": round(total_watch_time / 60, 2),
+        "avg_watch_time_per_student": round((total_watch_time / students_count / 60), 2) if students_count > 0 else 0,
         "avg_quiz_score": round(doc.get("avg_quiz_score") or 0, 2),
         "generated_at": datetime.utcnow().isoformat()
     }
@@ -99,18 +105,24 @@ async def student_patterns(db: Database, r: Redis, user_id: str) -> Dict[str, An
             "_id": "$user_id",
             "avg_completion": {"$avg": "$progress_percent"},
             "total_courses": {"$sum": 1},
+            "total_watch_time": {"$sum": {"$sum": {"$map": {"input": {"$objectToArray": {"$ifNull": ["$video_watch_times", {}]}}, "as": "item", "in": "$$item.v"}}}},
             "active_days": {"$addToSet": {"$dateToString": {"format": "%Y-%m-%d", "date": "$last_accessed"}}}
         }}
     ]
     result = list(db.progress.aggregate(pipeline))
     if not result:
-        return {"user_id": user_id, "avg_completion": 0, "total_courses": 0, "active_days": 0}
+        return {"user_id": user_id, "avg_completion": 0, "total_courses": 0, "total_watch_time_minutes": 0, "active_days": 0}
 
     doc = result[0]
+    total_courses = doc.get("total_courses", 0)
+    total_watch_time = doc.get("total_watch_time", 0)
+    
     payload = {
         "user_id": user_id,
         "avg_completion": round(doc.get("avg_completion") or 0, 2),
-        "total_courses": doc.get("total_courses", 0),
+        "total_courses": total_courses,
+        "total_watch_time_minutes": round(total_watch_time / 60, 2),
+        "avg_watch_time_per_course": round((total_watch_time / total_courses / 60), 2) if total_courses > 0 else 0,
         "active_days": len(doc.get("active_days", [])),
         "generated_at": datetime.utcnow().isoformat()
     }

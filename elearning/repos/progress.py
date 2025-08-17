@@ -14,6 +14,7 @@ def ensure_indexes(db: Database) -> None:
     db.progress.create_index([("user_id", ASCENDING), ("course_id", ASCENDING)], unique=True, name="user_course_unique")
     db.progress.create_index([("user_id", ASCENDING), ("last_accessed", DESCENDING)], name="user_last_accessed")
     db.progress.create_index([("course_id", ASCENDING)], name="by_course")
+    db.progress.create_index([("video_watch_times", ASCENDING)], name="video_watch_times")
 
 def _course_total_lessons(db: Database, course_id: str) -> int:
     doc = db.courses.find_one({"_id": _oid(course_id)}, {"lessons_count": 1})
@@ -26,7 +27,7 @@ def get_user_course_progress(db: Database, user_id: str, course_id: str) -> Opti
     doc["_id"] = str(doc["_id"])
     return doc
 
-async def upsert_lesson_completion(db: Database, r, *, user_id: str, course_id: str, lesson_id: str, ts: datetime) -> Dict[str, Any]:
+def upsert_lesson_completion(db: Database, r, *, user_id: str, course_id: str, lesson_id: str, ts: datetime) -> Dict[str, Any]:
     try:
         db.progress.update_one(
             {"user_id": user_id, "course_id": course_id},
@@ -55,12 +56,24 @@ async def upsert_lesson_completion(db: Database, r, *, user_id: str, course_id: 
         {"$set": {"progress_percent": percent, "total_lessons": total_lessons}}
     )
 
-    # Invalidate related caches
-    await r.delete(
-        analytics_course_key(course_id),
-        user_dashboard_key(user_id),
-        progress_key(user_id, course_id),
-        analytics_student_patterns_key(user_id)
+    # Note: Cache invalidation is handled in the service layer
+    
+    out = db.progress.find_one({"user_id": user_id, "course_id": course_id})
+    out["_id"] = str(out["_id"])
+    return out
+
+def update_video_watch_time(db: Database, user_id: str, course_id: str, lesson_id: str, watch_time: int) -> Dict[str, Any]:
+    # Ensure progress document exists
+    db.progress.update_one(
+        {"user_id": user_id, "course_id": course_id},
+        {"$setOnInsert": {"completed_lessons": [], "progress_percent": 0.0, "video_watch_times": {}, "last_accessed": datetime.utcnow()}},
+        upsert=True
+    )
+    
+    # Update video watch time
+    db.progress.update_one(
+        {"user_id": user_id, "course_id": course_id},
+        {"$inc": {f"video_watch_times.{lesson_id}": watch_time}, "$set": {"last_accessed": datetime.utcnow()}}
     )
     
     out = db.progress.find_one({"user_id": user_id, "course_id": course_id})

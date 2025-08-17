@@ -5,11 +5,14 @@ from typing import Dict, Any, Optional
 from redis.asyncio import Redis
 from pymongo.database import Database
 from fastapi.concurrency import run_in_threadpool
+from yaml import serialize
 from repos import courses as repo
 from services.memory_cache import memory_cache
 from repos.helper import JSONEncoder
 from services.cache_stats import hit, miss
 from services.cache_keys import course_key, courses_list_key
+from services.realtime_analytics import publish_analytics_update
+
 
 # TTLs per PDF
 COURSE_TTL = 60 * 5          # 5 minutes cache TTL for individual courses
@@ -75,7 +78,7 @@ async def get_course(db: Database, r: Redis, course_id: str) -> Optional[Dict[st
         doc = await run_in_threadpool(repo.get_course_by_id, db, course_id)
         if doc:
             # Store in both cache levels
-            await r.set(key, json.dumps(JSONEncoder().encode(doc)), ex=COURSE_TTL)
+            await r.set(key, json.dumps(doc, cls=JSONEncoder), ex=COURSE_TTL)
             await _set_l1(key, doc, ttl=COURSE_TTL)
         return doc
 
@@ -114,7 +117,7 @@ async def list_courses(db: Database, r: Redis, *, q: Optional[str], filters: Dic
         )
         payload = {"total": total, "page": page, "page_size": page_size, "items": items}
         # Store in both cache levels
-        await r.set(key, json.dumps(JSONEncoder().encode(payload)), ex=COURSE_LIST_TTL)
+        await r.set(key, json.dumps(payload, cls=JSONEncoder), ex=COURSE_LIST_TTL)
         await _set_l1(key, payload, ttl=COURSE_LIST_TTL)
         return payload
 
@@ -126,8 +129,29 @@ async def create_course(db: Database, r: Redis, data: Dict[str, Any]) -> Dict[st
     await _invalidate_course_lists(r)
     # Cache the new course
     key = course_key(doc["_id"])
-    await r.set(key, json.dumps(JSONEncoder().encode(doc)), ex=COURSE_TTL)
+    await r.set(key, json.dumps(doc, cls=JSONEncoder), ex=COURSE_TTL)
     await _set_l1(key, doc, ttl=COURSE_TTL)
+    
+    # Invalidate platform analytics cache
+    from services.cache_keys import analytics_platform_overview_key
+    platform_key = analytics_platform_overview_key()
+    await _del_l1(platform_key)
+    await r.delete(platform_key)
+    
+    # Publish real-time update
+    await publish_analytics_update(r, "course_created", doc["_id"], {
+        "course_id": doc["_id"],
+        "title": doc.get("title", ""),
+        "generated_at": doc.get("created_at")
+    })
+    
+    # Also broadcast to platform overview
+    await publish_analytics_update(r, "platform_update", "platform", {
+        "event": "course_created",
+        "course_id": doc["_id"],
+        "generated_at": doc.get("created_at")
+    })
+    
     return doc
 
 async def update_course_module(db: Database, r: Redis, course_id: str, module_id: str, patch: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -140,8 +164,15 @@ async def update_course_module(db: Database, r: Redis, course_id: str, module_id
         await _del_l1(key); await r.delete(key)
         await _invalidate_course_lists(r)
         # Cache updated course
-        await r.set(key, json.dumps(JSONEncoder().encode(doc)), ex=COURSE_TTL)
+        await r.set(key, json.dumps(doc, cls=JSONEncoder), ex=COURSE_TTL)
         await _set_l1(key, doc, ttl=COURSE_TTL)
+        
+        # Publish real-time update
+        await publish_analytics_update(r, "course_updated", course_id, {
+            "course_id": course_id,
+            "module_id": module_id,
+            "generated_at": doc.get("updated_at")
+        })
     return doc
 
 async def replace_course(db: Database, r: Redis, course_id: str, patch: Dict[str, Any]) -> Optional[Dict[str, Any]]:

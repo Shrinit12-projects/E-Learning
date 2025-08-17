@@ -1,8 +1,13 @@
 from pydantic import BaseModel, Field, constr
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 
 ID = constr(strip_whitespace=True, min_length=1)
+
+class VideoWatchTimeIn(BaseModel):
+    course_id: ID
+    lesson_id: ID
+    watch_time: int = Field(..., ge=0, description="Watch time in seconds")
 
 class CompleteLessonIn(BaseModel):
     course_id: ID
@@ -18,6 +23,7 @@ class CourseProgressOut(BaseModel):
     completed_count: int = 0
     total_lessons: int = 0
     completed_lessons: List[CompletedLesson] = []
+    video_watch_times: Dict[str, int] = {}  # lesson_id -> total_seconds
     last_accessed: Optional[datetime] = None
 
 class DashboardCourseItem(BaseModel):

@@ -6,21 +6,18 @@ from fastapi.concurrency import run_in_threadpool
 from config import settings
 from deps import create_mongo_client, create_redis_client
 from repos.users import ensure_indexes as ensure_user_indexes
-from repos.courses import ensure_indexes as ensure_course_indexes
 from routers.health import router as health_router
 from routers.user_auth import auth
 from routers.courses_route import courses
-from services.course_service import warm_courses_cache  # NEW
-from repos.progress import ensure_indexes as ensure_progress_indexes
 from routers.student_progress import progress_route
 from routers.analytics_route import analytics
 from routers.cache_route import cache
-
-
-
+from routers.realtime_route import realtime
 from tasks.scheduler import create_scheduler, schedule_jobs
+from services.realtime_analytics import listen_analytics_updates
+from services.cache_warming import warm_critical_caches
 from repos.progress import ensure_indexes as ensure_progress_indexes
-from repos.users import ensure_indexes as ensure_user_indexes  # you already had something like this
+from repos.users import ensure_indexes as ensure_user_indexes
 
 app = FastAPI(title="E-Learning Analytics API (dev)")
 
@@ -37,10 +34,15 @@ async def startup():
 
     # APScheduler
     app.state.scheduler = create_scheduler()
-    print("here")
     schedule_jobs(app.state.scheduler, app.state.db, app.state.redis)
-    print("here")
     app.state.scheduler.start()
+    
+    # Start real-time analytics listener
+    import asyncio
+    asyncio.create_task(listen_analytics_updates(app.state.redis, app.state.db))
+    
+    # Warm critical caches on startup
+    asyncio.create_task(warm_critical_caches(app.state.db, app.state.redis))
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -64,3 +66,4 @@ app.include_router(courses.router)
 app.include_router(progress_route.router)
 app.include_router(analytics.router)
 app.include_router(cache.router)
+app.include_router(realtime.router)
