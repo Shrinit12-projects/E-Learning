@@ -1,4 +1,5 @@
-from typing import Dict, Any, Optional, List, Tuple
+# repos/progress.py  (only showing the changed/complete file for clarity)
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 from bson import ObjectId
 from pymongo.database import Database
@@ -9,7 +10,6 @@ def _oid(id_str: str) -> ObjectId:
     return ObjectId(id_str)
 
 def ensure_indexes(db: Database) -> None:
-    # Uniqueness per (user, course)
     db.progress.create_index([("user_id", ASCENDING), ("course_id", ASCENDING)], unique=True, name="user_course_unique")
     db.progress.create_index([("user_id", ASCENDING), ("last_accessed", DESCENDING)], name="user_last_accessed")
     db.progress.create_index([("course_id", ASCENDING)], name="by_course")
@@ -26,12 +26,6 @@ def get_user_course_progress(db: Database, user_id: str, course_id: str) -> Opti
     return doc
 
 def upsert_lesson_completion(db: Database, *, user_id: str, course_id: str, lesson_id: str, ts: datetime) -> Dict[str, Any]:
-    """
-    - Creates progress doc if missing
-    - Adds completed lesson if not already present
-    - Recomputes progress_percent with current course lessons_count
-    """
-    # Ensure doc exists
     try:
         db.progress.update_one(
             {"user_id": user_id, "course_id": course_id},
@@ -41,18 +35,15 @@ def upsert_lesson_completion(db: Database, *, user_id: str, course_id: str, less
     except DuplicateKeyError:
         pass
 
-    # Add lesson if not already there
     db.progress.update_one(
         {"user_id": user_id, "course_id": course_id, "completed_lessons.lesson_id": {"$ne": lesson_id}},
         {"$push": {"completed_lessons": {"lesson_id": lesson_id, "completed_at": ts}}, "$set": {"last_accessed": ts}}
     )
-    # Always bump last_accessed (even if lesson already existed)
     db.progress.update_one(
         {"user_id": user_id, "course_id": course_id},
         {"$set": {"last_accessed": ts}}
     )
 
-    # Recompute percent
     prog = db.progress.find_one({"user_id": user_id, "course_id": course_id}, {"completed_lessons": 1})
     completed_count = len(prog.get("completed_lessons", [])) if prog else 0
     total_lessons = _course_total_lessons(db, course_id)
@@ -60,19 +51,14 @@ def upsert_lesson_completion(db: Database, *, user_id: str, course_id: str, less
 
     db.progress.update_one(
         {"user_id": user_id, "course_id": course_id},
-        {"$set": {"progress_percent": percent}}
+        {"$set": {"progress_percent": percent, "total_lessons": total_lessons}}
     )
 
-    # Return full doc
     out = db.progress.find_one({"user_id": user_id, "course_id": course_id})
     out["_id"] = str(out["_id"])
     return out
 
 def get_user_dashboard(db: Database, user_id: str) -> Dict[str, Any]:
-    """
-    Returns per-course progress for user, with course meta (title, slug, category)
-    plus rollups for counts and averages.
-    """
     pipeline = [
         {"$match": {"user_id": user_id}},
         {"$lookup": {

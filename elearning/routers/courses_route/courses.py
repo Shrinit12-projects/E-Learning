@@ -12,6 +12,7 @@ from repos.helper import JSONEncoder
 
 router = APIRouter(prefix="/courses", tags=["courses"])
 
+# Route to get paginated list of courses with various filter options
 @router.get("", response_model=CoursesPage)
 async def list_courses(
     search: Optional[str] = Query(None, description="Full-text search"),
@@ -28,6 +29,27 @@ async def list_courses(
     db: Database = Depends(get_db),
     r: Redis = Depends(get_redis),
 ):
+    """
+    Get paginated list of courses with filtering and sorting options.
+    
+    Args:
+        search: Optional text to search courses
+        category: Optional category filter
+        tags: Optional list of tags to filter by
+        difficulty: Filter by difficulty level (beginner/intermediate/advanced)
+        instructor_id: Filter courses by instructor
+        published: Filter by published status
+        min_duration: Minimum course duration in minutes
+        max_duration: Maximum course duration in minutes
+        sort_by: Sort order (recent/popular/top_rated/duration)
+        page: Page number for pagination
+        page_size: Number of items per page
+        db: MongoDB database instance
+        r: Redis instance
+        
+    Returns:
+        CoursesPage object containing paginated course results
+    """
     filters = {
         **({"category": category} if category else {}),
         **({"difficulty": difficulty} if difficulty else {}),
@@ -39,9 +61,25 @@ async def list_courses(
     }
     return await course_service.list_courses(db, r, q=search, filters=filters, page=page, page_size=page_size, sort_by=sort_by)
 
+# Route to create a new course
 @router.post("", response_model=CourseOut, status_code=status.HTTP_201_CREATED,
              dependencies=[Depends(require_role("instructor", "admin"))])
 async def create_course(payload: CourseCreate, db: Database = Depends(get_db), r: Redis = Depends(get_redis), user=Depends(get_current_user)):
+    """
+    Create a new course. Only instructors and admins can create courses.
+    
+    Args:
+        payload: CourseCreate object containing course details
+        db: MongoDB database instance
+        r: Redis instance
+        user: Current authenticated user
+        
+    Returns:
+        Created course object
+        
+    Raises:
+        HTTPException: If user is not authorized or course creation fails
+    """
     # enforce ownership
     print("User:", user)
     if str(payload.instructor_id) != str(user["_id"]) and user["role"] != "admin":
@@ -52,17 +90,50 @@ async def create_course(payload: CourseCreate, db: Database = Depends(get_db), r
         raise HTTPException(status_code=500, detail="Failed to create course")
     return json.loads(JSONEncoder().encode(doc))
 
+# Route to get a specific course by ID
 @router.get("/{course_id}", response_model=CourseOut)
 async def get_course(course_id: str, db: Database = Depends(get_db), r: Redis = Depends(get_redis)):
+    """
+    Get course details by course ID.
+    
+    Args:
+        course_id: ID of course to retrieve
+        db: MongoDB database instance
+        r: Redis instance
+        
+    Returns:
+        Course object if found
+        
+    Raises:
+        HTTPException: If course is not found
+    """
     doc = await course_service.get_course(db, r, course_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Course not found")
     return doc
 
+# Route to update a specific module within a course
 @router.put("/{course_id}/modules/{module_id}", response_model=CourseOut,
             dependencies=[Depends(require_role("instructor", "admin"))])
 async def update_module(course_id: str, module_id: str, patch: ModuleUpdate,
                         db: Database = Depends(get_db), r: Redis = Depends(get_redis), user=Depends(get_current_user)):
+    """
+    Update a specific module within a course. Only course owner or admin can update.
+    
+    Args:
+        course_id: ID of the course containing the module
+        module_id: ID of module to update
+        patch: ModuleUpdate object with fields to update
+        db: MongoDB database instance
+        r: Redis instance
+        user: Current authenticated user
+        
+    Returns:
+        Updated course object
+        
+    Raises:
+        HTTPException: If course/module not found or user not authorized
+    """
     # optional: ensure user owns this course unless admin
     course = await course_service.get_course(db, r, course_id)
     if not course:
@@ -74,13 +145,29 @@ async def update_module(course_id: str, module_id: str, patch: ModuleUpdate,
         raise HTTPException(status_code=404, detail="Module not found")
     return updated
 
-# this is for the updating the data
+# Route to update an entire course
 @router.put("/{course_id}", response_model=CourseOut,
             dependencies=[Depends(require_role("instructor", "admin"))])
 async def replace_course(course_id: str, payload: CourseUpdate,
                          db: Database = Depends(get_db),
                          r: Redis = Depends(get_redis),
                          user=Depends(get_current_user)):
+    """
+    Update an entire course. Only course owner or admin can update.
+    
+    Args:
+        course_id: ID of course to update
+        payload: CourseUpdate object with fields to update
+        db: MongoDB database instance
+        r: Redis instance
+        user: Current authenticated user
+        
+    Returns:
+        Updated course object
+        
+    Raises:
+        HTTPException: If course not found, update fails, or user not authorized
+    """
     # Ensure course exists
     course = await course_service.get_course(db, r, course_id)
     if not course:
@@ -97,8 +184,19 @@ async def replace_course(course_id: str, payload: CourseUpdate,
         raise HTTPException(status_code=500, detail="Failed to update course")
     return updated
 
+# Route to get analytics for a course
 @router.get("/{course_id}/analytics", dependencies=[Depends(require_role("instructor", "admin"))])
 async def course_analytics_preview(course_id: str):
+    """
+    Get analytics for a specific course. Only instructors and admins can access.
+    Currently a stub - will be implemented later.
+    
+    Args:
+        course_id: ID of course to get analytics for
+        
+    Returns:
+        Placeholder message
+    """
     # Stub for now – will implement in Analytics section per PDF.
     # Keeping endpoint in place so links/docs remain stable.
     return {"message": "Course analytics will be implemented later"}

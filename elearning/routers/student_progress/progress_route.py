@@ -1,20 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from typing import Optional
+# routers/progress_router.py
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from redis.asyncio import Redis
 from pymongo.database import Database
 
 from deps import get_db, get_redis
-from auth.dependencies import get_current_user  # assumes it returns dict with "_id" and "role"
+from auth.dependencies import get_current_user
 from services import progress_service
-from schemas.progress_schema import (
-    CompleteLessonIn, CourseProgressOut, ProgressDashboardOut
-)
+from schemas.progress_schema import CompleteLessonIn, CourseProgressOut, ProgressDashboardOut
 
 router = APIRouter(prefix="/progress", tags=["progress"])
 
 @router.post("/lessons/{lesson_id}/complete", status_code=status.HTTP_204_NO_CONTENT)
 async def complete_lesson(lesson_id: str,
                           payload: CompleteLessonIn,
+                          background: BackgroundTasks,
                           db: Database = Depends(get_db),
                           r: Redis = Depends(get_redis),
                           user = Depends(get_current_user)):
@@ -22,6 +21,8 @@ async def complete_lesson(lesson_id: str,
         await progress_service.complete_lesson(
             db, r, user_id=str(user["_id"]), course_id=payload.course_id, lesson_id=lesson_id
         )
+        # Warm the dashboard asynchronously (post-write)
+        background.add_task(progress_service.get_dashboard, db, r, user_id=str(user["_id"]))
         return
     except ValueError as ve:
         raise HTTPException(status_code=404, detail=str(ve))
@@ -33,7 +34,6 @@ async def course_progress(course_id: str,
                           user = Depends(get_current_user)):
     doc = await progress_service.get_course_progress(db, r, user_id=str(user["_id"]), course_id=course_id)
     if not doc:
-        # Return empty shell to keep response_model consistent
         return {
             "user_id": str(user["_id"]),
             "course_id": course_id,
@@ -43,13 +43,12 @@ async def course_progress(course_id: str,
             "completed_lessons": [],
             "last_accessed": None
         }
-    # map DB doc -> response model
     return {
         "user_id": doc["user_id"],
         "course_id": doc["course_id"],
         "progress_percent": doc.get("progress_percent", 0.0),
         "completed_count": len(doc.get("completed_lessons", [])),
-        "total_lessons": doc.get("total_lessons", 0),  # may be absent if not projected; safe default
+        "total_lessons": doc.get("total_lessons", 0),
         "completed_lessons": doc.get("completed_lessons", []),
         "last_accessed": doc.get("last_accessed")
     }
@@ -59,7 +58,6 @@ async def progress_dashboard(db: Database = Depends(get_db),
                              r: Redis = Depends(get_redis),
                              user = Depends(get_current_user)):
     doc = await progress_service.get_dashboard(db, r, user_id=str(user["_id"]))
-    # ensure defaults
     doc.setdefault("user_id", str(user["_id"]))
     doc.setdefault("items", [])
     doc.setdefault("total_courses", 0)

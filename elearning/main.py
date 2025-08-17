@@ -16,35 +16,29 @@ from routers.student_progress import progress_route
 
 
 
+from tasks.scheduler import create_scheduler, schedule_jobs
+from repos.progress import ensure_indexes as ensure_progress_indexes
+from repos.users import ensure_indexes as ensure_user_indexes  # you already had something like this
+
 app = FastAPI(title="E-Learning Analytics API (dev)")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 @app.on_event("startup")
 async def startup():
-    # Mongo
     app.state.mongo_client = create_mongo_client(settings.MONGO_URI)
     app.state.db = app.state.mongo_client.get_default_database()
-    # Redis
     app.state.redis = create_redis_client(settings.REDIS_URL)
 
-    # Indexes (blocking -> threadpool)
+    # indexes
     await run_in_threadpool(ensure_user_indexes, app.state.db)
-    await run_in_threadpool(ensure_course_indexes, app.state.db)
     await run_in_threadpool(ensure_progress_indexes, app.state.db)
 
-    # ---- Cache Warming ----
-    # Warm popular/recent lists + first-page results + individual courses referenced
-    try:
-        await warm_courses_cache(app.state.db, app.state.redis)
-    except Exception:
-        # Warming failures must never block startup
-        pass
+    # APScheduler
+    app.state.scheduler = create_scheduler()
+    print("here")
+    schedule_jobs(app.state.scheduler, app.state.db, app.state.redis)
+    print("here")
+    app.state.scheduler.start()
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -54,6 +48,10 @@ async def shutdown():
         pass
     try:
         await app.state.redis.close()
+    except Exception:
+        pass
+    try:
+        app.state.scheduler.shutdown(wait=False)
     except Exception:
         pass
 
