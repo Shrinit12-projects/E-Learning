@@ -18,6 +18,8 @@ from services.realtime_analytics import listen_analytics_updates
 from services.cache_warming import warm_critical_caches
 from repos.progress import ensure_indexes as ensure_progress_indexes
 from repos.users import ensure_indexes as ensure_user_indexes
+import asyncio
+
 
 app = FastAPI(title="E-Learning Analytics API (dev)")
 
@@ -38,7 +40,6 @@ async def startup():
     app.state.scheduler.start()
     
     # Start real-time analytics listener
-    import asyncio
     asyncio.create_task(listen_analytics_updates(app.state.redis, app.state.db))
     
     # Warm critical caches on startup
