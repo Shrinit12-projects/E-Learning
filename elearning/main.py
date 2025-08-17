@@ -1,4 +1,5 @@
 # main.py
+import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
@@ -6,6 +7,7 @@ from fastapi.concurrency import run_in_threadpool
 from config import settings
 from deps import create_mongo_client, create_redis_client
 from repos.users import ensure_indexes as ensure_user_indexes
+from repos.progress import ensure_indexes as ensure_progress_indexes
 from routers.health import router as health_router
 from routers.user_auth import auth
 from routers.courses_route import courses
@@ -13,12 +15,12 @@ from routers.student_progress import progress_route
 from routers.analytics_route import analytics
 from routers.cache_route import cache
 from routers.realtime_route import realtime
+from routers.backup_route import router as backup_router
 from tasks.scheduler import create_scheduler, schedule_jobs
 from services.realtime_analytics import listen_analytics_updates
 from services.cache_warming import warm_critical_caches
-from repos.progress import ensure_indexes as ensure_progress_indexes
-from repos.users import ensure_indexes as ensure_user_indexes
-import asyncio
+from services.cache_backup import CacheBackupService
+from services.cache_recovery import CacheRecoveryService
 
 
 app = FastAPI(title="E-Learning Analytics API (dev)")
@@ -44,6 +46,13 @@ async def startup():
     
     # Warm critical caches on startup
     asyncio.create_task(warm_critical_caches(app.state.db, app.state.redis))
+    
+    # Initialize cache backup and recovery services
+    app.state.backup_service = CacheBackupService(app.state.redis, app.state.db)
+    app.state.recovery_service = CacheRecoveryService(app.state.redis, app.state.db, app.state.backup_service)
+    
+    # Perform initial health check and recovery if needed
+    asyncio.create_task(app.state.recovery_service.auto_recovery())
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -68,3 +77,6 @@ app.include_router(progress_route.router)
 app.include_router(analytics.router)
 app.include_router(cache.router)
 app.include_router(realtime.router)
+
+# Cache backup router
+app.include_router(backup_router)

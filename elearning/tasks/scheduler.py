@@ -16,6 +16,11 @@ def create_scheduler() -> AsyncIOScheduler:
     return AsyncIOScheduler()
 
 def schedule_jobs(scheduler: AsyncIOScheduler, db: Database, r: Redis) -> None:
+    from .backup_tasks import schedule_backup_jobs
+    
+    # Schedule backup jobs
+    schedule_backup_jobs(scheduler, db, r)
+    
     # Critical caches (high frequency)
     scheduler.add_job(
         cache_warming.warm_critical_caches,
