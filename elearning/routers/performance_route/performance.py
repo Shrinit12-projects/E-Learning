@@ -1,15 +1,24 @@
 # routers/performance_route/performance.py
 import time
 from fastapi import APIRouter, Depends, Query, HTTPException
-from typing import Dict, Any, List, Optional
+from typing import Optional
 from redis.asyncio import Redis
 from pymongo.database import Database
-
+import asyncio
+import json
+from repos.helper import JSONEncoder
+import random
+from services.course_service import get_course, list_courses
 from deps import get_redis, get_db
-from auth.dependencies import require_role
 from services.performance_analysis import PerformanceBenchmark
 from repos import courses as course_repo
+from services.memory_cache import memory_cache
 from fastapi.concurrency import run_in_threadpool
+from services.cache_keys import course_key
+import statistics
+from services.cache_service import get_cache_stats
+
+
 
 router = APIRouter(
     prefix="/performance", 
@@ -54,7 +63,6 @@ async def benchmark_course_retrieval(
                 "avg_response_time_ms": round(result.cached_metrics.avg_response_time * 1000, 2),
                 "min_response_time_ms": round(result.cached_metrics.min_response_time * 1000, 2),
                 "max_response_time_ms": round(result.cached_metrics.max_response_time * 1000, 2),
-                "p95_response_time_ms": round(result.cached_metrics.p95_response_time * 1000, 2),
                 "throughput_ops_per_sec": round(result.cached_metrics.throughput, 2),
                 "cache_hit_ratio": result.cached_metrics.cache_hit_ratio
             },
@@ -62,7 +70,6 @@ async def benchmark_course_retrieval(
                 "avg_response_time_ms": round(result.non_cached_metrics.avg_response_time * 1000, 2),
                 "min_response_time_ms": round(result.non_cached_metrics.min_response_time * 1000, 2),
                 "max_response_time_ms": round(result.non_cached_metrics.max_response_time * 1000, 2),
-                "p95_response_time_ms": round(result.non_cached_metrics.p95_response_time * 1000, 2),
                 "throughput_ops_per_sec": round(result.non_cached_metrics.throughput, 2)
             },
             "performance_improvement_percent": round(result.performance_improvement, 2),
@@ -111,14 +118,13 @@ async def benchmark_course_listing(
                 "avg_response_time_ms": round(result.cached_metrics.avg_response_time * 1000, 2),
                 "min_response_time_ms": round(result.cached_metrics.min_response_time * 1000, 2),
                 "max_response_time_ms": round(result.cached_metrics.max_response_time * 1000, 2),
-                "p95_response_time_ms": round(result.cached_metrics.p95_response_time * 1000, 2),
+                
                 "throughput_ops_per_sec": round(result.cached_metrics.throughput, 2)
             },
             "non_cached": {
                 "avg_response_time_ms": round(result.non_cached_metrics.avg_response_time * 1000, 2),
                 "min_response_time_ms": round(result.non_cached_metrics.min_response_time * 1000, 2),
                 "max_response_time_ms": round(result.non_cached_metrics.max_response_time * 1000, 2),
-                "p95_response_time_ms": round(result.non_cached_metrics.p95_response_time * 1000, 2),
                 "throughput_ops_per_sec": round(result.non_cached_metrics.throughput, 2)
             },
             "performance_improvement_percent": round(result.performance_improvement, 2),
@@ -200,9 +206,7 @@ async def run_stress_test(
     - **concurrent_users**: Number of concurrent users (5-100)
     """
     
-    import asyncio
-    import time
-    import random
+
     
     # Get sample courses for testing
     total, courses = await run_in_threadpool(
@@ -224,7 +228,7 @@ async def run_stress_test(
     
     async def simulate_user():
         """Simulate a single user's behavior"""
-        from services.course_service import get_course, list_courses
+        
         
         while True:
             try:
@@ -266,14 +270,11 @@ async def run_stress_test(
     
     # Calculate statistics
     if results["response_times"]:
-        import statistics
         avg_response_time = statistics.mean(results["response_times"])
-        p95_response_time = statistics.quantiles(results["response_times"], n=20)[18]
         total_requests = results["successful_requests"] + results["failed_requests"]
         throughput = total_requests / duration_seconds
     else:
         avg_response_time = 0
-        p95_response_time = 0
         total_requests = 0
         throughput = 0
     
@@ -289,7 +290,6 @@ async def run_stress_test(
                 "failed_requests": results["failed_requests"],
                 "success_rate_percent": (results["successful_requests"] / max(1, total_requests)) * 100,
                 "avg_response_time_ms": round(avg_response_time * 1000, 2),
-                "p95_response_time_ms": round(p95_response_time * 1000, 2),
                 "throughput_requests_per_sec": round(throughput, 2)
             },
             "errors": results["errors"][:10]  # Show first 10 errors
@@ -309,10 +309,7 @@ async def compare_cache_layers(
     - **operation**: Operation to test
     - **sample_size**: Number of samples per test
     """
-    import time
-    import statistics
-    from services.memory_cache import memory_cache
-    from repos import courses as course_repo
+    
     
     # Get a sample course for testing
     total, courses = await run_in_threadpool(
@@ -326,7 +323,6 @@ async def compare_cache_layers(
     course_id = courses[0]["_id"]
     
     # Test L1 Cache (Memory)
-    from services.cache_keys import course_key
     key = course_key(course_id)
     
     # Pre-populate L1 cache
@@ -340,8 +336,6 @@ async def compare_cache_layers(
         l1_times.append(time.perf_counter() - start)
     
     # Test L2 Cache (Redis)
-    import json
-    from repos.helper import JSONEncoder
     await redis.set(key, json.dumps(course_data, cls=JSONEncoder), ex=300)
     
     l2_times = []
@@ -395,9 +389,7 @@ async def performance_health(
 ):
     """
     Get basic performance health status (no authentication required).
-    """
-    from services.cache_service import get_cache_stats
-    
+    """    
     try:
         cache_stats = await get_cache_stats(redis)
         total_hits = cache_stats.get("redis_hits", 0)

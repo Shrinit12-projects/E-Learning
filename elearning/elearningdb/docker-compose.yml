@@ -10,29 +10,75 @@ services:
       - mongo-data:/data/db
     networks:
       - elearning_net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   redis:
     image: redis:7-alpine
     container_name: elearning-redis
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
+      - ../redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
     networks:
       - elearning_net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   mongo-init:
     image: mongo:6.0
     container_name: elearning-mongo-init
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
     networks:
       - elearning_net
-    # Run our init script once; script handles idempotency
     entrypoint: ["/bin/bash", "/scripts/mongo-init.sh"]
     volumes:
       - ../mongo-init.sh:/scripts/mongo-init.sh:ro
+    restart: "no"
 
 volumes:
   mongo-data:
+  redis-data:
 
 networks:
   elearning_net:

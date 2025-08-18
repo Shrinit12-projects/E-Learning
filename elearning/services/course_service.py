@@ -26,7 +26,7 @@ def _filters_key(q: Optional[str], filters: Dict[str, Any], page: int, page_size
     """Generate a unique cache key based on course list filter parameters."""
     # Create payload with all filter parameters
     payload = {"q": q, "filters": filters, "page": page, "page_size": page_size, "sort_by": sort_by}
-    # Generate SHA1 hash of sorted JSON payload as cache key
+    
     digest = hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()
     return digest
 
