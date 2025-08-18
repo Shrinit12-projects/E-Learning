@@ -13,6 +13,7 @@ from routers.student_progress import progress_route
 from routers.analytics_route import analytics
 from routers.cache_route import cache
 from routers.realtime_route import realtime
+from routers.performance_route import performance
 from tasks.scheduler import create_scheduler, schedule_jobs
 from services.realtime_analytics import listen_analytics_updates
 from services.cache_warming import warm_critical_caches
@@ -68,3 +69,5 @@ app.include_router(progress_route.router)
 app.include_router(analytics.router)
 app.include_router(cache.router)
 app.include_router(realtime.router)
+# Performance analysis router
+app.include_router(performance.router)
