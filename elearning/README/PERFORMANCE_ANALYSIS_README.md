@@ -64,5 +64,4 @@ curl "http://localhost:8000/performance/compare/cache-layers" \
 Run the complete demo:
 ```bash
 cd elearning
-python scripts/performance_demo.py
 ```
